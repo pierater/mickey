@@ -57,9 +57,9 @@ class Configuration(object):
             ],
 
             # Module config.
-            'weather_query': 'Lawrence,KS',
+            'weather_query': 'Salinas,CA',
             'weather_units': 'imperial',
-            'ip_interfaces': ['wlan0', 'eth0'],
+            'ip_interfaces': ['wlan0'],#, 'eth0'],
             'clock_format': '%Y-%m-%d %H:%M:%S',
             'clock_calendar_url': (
                 'https://www.google.com/calendar/render?tab=mc'),
@@ -255,7 +255,7 @@ class Module(object):
 
 class CPU(Module):
     name = 'cpu'
-    template = 'C %(formatted_value)s'
+    template = 'CPU %(formatted_value)s'
     prev_idle = 0
     prev_total = 0
 
@@ -301,7 +301,7 @@ class CPU(Module):
 class Disk(Module):
     cache_timeout = 60
     name = 'disk'
-    template = 'D %(formatted_value)s'
+    template = 'DISK %(formatted_value)s'
 
     def post_init(self):
         self.path = self.config.get('disk_path', '/')
@@ -321,7 +321,7 @@ class Disk(Module):
 
 class RAM(Module):
     name = 'ram'
-    template = 'R %(formatted_value)s'
+    template = 'RAM %(formatted_value)s'
 
     def get_value(self):
         with open('/proc/meminfo') as fh:
@@ -484,27 +484,30 @@ class Weather(Module):
     name = 'weather'
     current_endpoint = 'http://api.openweathermap.org/data/2.5/weather'
     forecast_endpoint = 'http://api.openweathermap.org/data/2.5/forecast/daily'
+    api_key = 'id=524901&APPID=c43141de7c5509b41e8a28b12bde10a2'
 
     def post_init(self):
         query = self.config.get('weather_query') or 'Lawrence,KS'
         units = self.config.get('weather_units') or 'imperial'
-        self._current_url = '%s?%s' % (
+        self._current_url = '%s?%s?%s' % (
             self.current_endpoint,
-            urllib.urlencode({'q': query, 'units': units}))
-        self._forecast_url = '%s?%s' % (
+            urllib.urlencode({'q': query, 'units': units}),
+            str(self.api_key))
+        self._forecast_url = '%s?%s?%s' % (
             self.forecast_endpoint,
-            urllib.urlencode({'q': query, 'units': units, 'cnt': 2}))
+            urllib.urlencode({'q': query, 'units': units, 'cnt': 2}),
+            str(self.api_key))
 
     def fetch(self, url):
         try:
-            fh = urllib2.urlopen(url)
+ 	    fh = urllib2.urlopen(url)
             return json.loads(fh.read())
         except:
             pass
 
     def format_forecast(self, data):
         return '%s %s/%s' % (
-            data['weather'][0]['main'],
+            data['weather'][0]['description'],
             int(data['temp']['max']),
             int(data['temp']['min']))
 
@@ -517,7 +520,8 @@ class Weather(Module):
             raise ValueError('<disconnected>')
 
         current = int(current_data['main']['temp'])
-        return '%s: %s' % (
+        current = int((current * float(9)/5) - 459.67)
+        return 'Temp %s: %s' % (
             current,
             self.format_forecast(forecast_data['list'][0]))
 
