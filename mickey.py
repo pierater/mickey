@@ -38,9 +38,9 @@ class Configuration(object):
 
             # Formatter config.
             'formatter': 'bar',
-            'bar_size': 7,
+            'bar_size': 15,
             'bar_full': '#',
-            'bar_empty': ' ',
+            'bar_empty': '-',
             'bar_framing': '[%s]',
 
             # Module list.
@@ -51,16 +51,17 @@ class Configuration(object):
                 'ram',
                 'disk',
                 'battery',
+                'volume',
                 'ip',
-                'loadavg',
+                #'loadavg',
                 'clock',
             ],
 
             # Module config.
-            'weather_query': 'Lawrence,KS',
+            'weather_query': 'Salinas,CA',
             'weather_units': 'imperial',
-            'ip_interfaces': ['wlan0', 'eth0'],
-            'clock_format': '%Y-%m-%d %H:%M:%S',
+            'ip_interfaces': ['wlp1s0'],#, 'eth0'],
+            'clock_format': '%Y-%m-%d %I:%M:%S',
             'clock_calendar_url': (
                 'https://www.google.com/calendar/render?tab=mc'),
 
@@ -75,9 +76,10 @@ class Configuration(object):
             'color_ram': 4,
             'color_disk': 3,
             'color_battery': 13,
+            'color_volume': 14,
             'color_ip': 2,
             'color_loadavg': 2,
-            'color_clock': 11,
+            'color_clock': 10,
         }
 
     def load(self):
@@ -255,7 +257,7 @@ class Module(object):
 
 class CPU(Module):
     name = 'cpu'
-    template = 'C %(formatted_value)s'
+    template = 'CPU %(formatted_value)s'
     prev_idle = 0
     prev_total = 0
 
@@ -301,7 +303,7 @@ class CPU(Module):
 class Disk(Module):
     cache_timeout = 60
     name = 'disk'
-    template = 'D %(formatted_value)s'
+    template = 'DISK %(formatted_value)s'
 
     def post_init(self):
         self.path = self.config.get('disk_path', '/')
@@ -321,7 +323,7 @@ class Disk(Module):
 
 class RAM(Module):
     name = 'ram'
-    template = 'R %(formatted_value)s'
+    template = 'RAM %(formatted_value)s'
 
     def get_value(self):
         with open('/proc/meminfo') as fh:
@@ -366,7 +368,7 @@ class IPAddress(Module):
         # http://stackoverflow.com/a/9267833/254346
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sockfd = sock.fileno()
-        for iface in self.config.get('ip_interfaces') or ['wlan0']:
+        for iface in self.config.get('ip_interfaces') or ['wlp1s0']:
             ifreq = struct.pack('16sH14s', iface, socket.AF_INET, '\x00' * 14)
             try:
                 res = fcntl.ioctl(sockfd, self.SIOCGIFADDR, ifreq)
@@ -385,13 +387,40 @@ class Clock(Module):
     name = 'clock'
 
     def post_init(self):
-        self._format = self.config.get('clock_format') or '%Y-%m-%d %H:%M:%S'
+        self._format = self.config.get('clock_format') or '%Y-%m-%d %I:%M:%S'
 
     def get_value(self):
         return datetime.datetime.now().strftime(self._format)
 
     def on_click(self, data):
         self.open_url(self.config['clock_calendar_url'])
+
+class Volume(Module):
+    name = 'volume'
+
+    Status = namedtuple('Status', (
+        'volume_percent', 'remaining'))
+
+    def post_init(self):
+        self._format = "0"
+
+    def read_volume(self):
+        proc = subprocess.Popen('/home/pico/Scripts/volume.sh', stdout=subprocess.PIPE)
+        vol = proc.stdout.read()
+
+        vol = vol.replace("%", "")
+        vol = vol.replace("\n", "")
+        remaining = 100.0 - int(vol)
+
+        return self.Status(
+            vol,
+            remaining)
+    def get_value(self):
+        self._status = self.read_volume()
+        return self._status.volume_percent
+
+    def render(self, data):
+        return '%s %s' % ("VOL:", self._status.volume_percent)
 
 class Battery(Module):
     cache_timeout = 60
@@ -484,27 +513,30 @@ class Weather(Module):
     name = 'weather'
     current_endpoint = 'http://api.openweathermap.org/data/2.5/weather'
     forecast_endpoint = 'http://api.openweathermap.org/data/2.5/forecast/daily'
+    api_key = 'id=524901&APPID=c43141de7c5509b41e8a28b12bde10a2'
 
     def post_init(self):
         query = self.config.get('weather_query') or 'Lawrence,KS'
         units = self.config.get('weather_units') or 'imperial'
-        self._current_url = '%s?%s' % (
+        self._current_url = '%s?%s?%s' % (
             self.current_endpoint,
-            urllib.urlencode({'q': query, 'units': units}))
-        self._forecast_url = '%s?%s' % (
+            urllib.urlencode({'q': query, 'units': units}),
+            str(self.api_key))
+        self._forecast_url = '%s?%s?%s' % (
             self.forecast_endpoint,
-            urllib.urlencode({'q': query, 'units': units, 'cnt': 2}))
+            urllib.urlencode({'q': query, 'units': units, 'cnt': 2}),
+            str(self.api_key))
 
     def fetch(self, url):
         try:
-            fh = urllib2.urlopen(url)
+ 	    fh = urllib2.urlopen(url)
             return json.loads(fh.read())
         except:
             pass
 
     def format_forecast(self, data):
         return '%s %s/%s' % (
-            data['weather'][0]['main'],
+            data['weather'][0]['description'],
             int(data['temp']['max']),
             int(data['temp']['min']))
 
@@ -517,7 +549,8 @@ class Weather(Module):
             raise ValueError('<disconnected>')
 
         current = int(current_data['main']['temp'])
-        return '%s: %s' % (
+        current = int((current * float(9)/5) - 459.67)
+        return 'Temp %s: %s' % (
             current,
             self.format_forecast(forecast_data['list'][0]))
 
